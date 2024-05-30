@@ -1,5 +1,5 @@
 import binascii
-from decryptor import decrypt_sun_message, ParamMode, InvalidMessage
+from decryptor import decrypt_sun_message, ParamMode, InvalidMessage, decrypt_data1
 from fastapi import HTTPException
 from derive import derive_undiversified_key, derive_tag_key
 from config import (
@@ -13,9 +13,12 @@ from config import (
     DERIVE_MODE,
 )
 
-def decrypt_data(encrypted_data):
+def decryptData(picc_data,enc_file_data,cmac):
     # Placeholder for actual decryption logic
-    picc_data, enc_file_data, cmac = parse_encrypted_data(encrypted_data)
+    #print(type(encryptedData))
+    #picc_data, enc_file_data, cmac = parse_encrypted_data(encrypted_data)
+    print(type(picc_data))
+    print(type(cmac))
     try:
         enc_picc_data_b = binascii.unhexlify(picc_data)
         enc_file_data_b = binascii.unhexlify(enc_file_data) if enc_file_data else None
@@ -26,37 +29,40 @@ def decrypt_data(encrypted_data):
     param_mode = ParamMode.SEPARATED
 
     try:
-        result = decrypt_sun_message(
-            param_mode=param_mode,
-            sdm_meta_read_key=derive_undiversified_key(MASTER_KEY, 1),
-            sdm_file_read_key=lambda uid: derive_tag_key(MASTER_KEY, uid, 2),
-            picc_enc_data=enc_picc_data_b,
-            sdmmac=sdmmac_b,
-            enc_file_data=enc_file_data_b
-        )
+        #result = decrypt_sun_message(
+            #param_mode=param_mode,
+            #sdm_meta_read_key=derive_undiversified_key(MASTER_KEY, 1),
+            #sdm_file_read_key=lambda uid: derive_tag_key(MASTER_KEY, uid, 2),
+            #picc_enc_data=enc_picc_data_b,
+            #sdmmac=sdmmac_b,
+            #enc_file_data=enc_file_data_b
+        #)
+        meta_data_aes_key_bytes=derive_undiversified_key(MASTER_KEY, 1)
+        result1 = decrypt_data1(picc_data,enc_file_data,meta_data_aes_key_bytes,cmac)
+        print("result1 : ",result1)
     except InvalidMessage:
         raise HTTPException(status_code=400, detail="Invalid message (most probably wrong signature).")
 
     if REQUIRE_LRP and result['encryption_mode'] != EncMode.LRP:
         raise HTTPException(status_code=400, detail="Invalid encryption mode, expected LRP.")
 
-    response = {
-        "picc_data_tag": result['picc_data_tag'].hex().upper(),
-        "uid": result['uid'].hex().upper(),
-        "read_ctr": result['read_ctr'],
-        "file_data": result['file_data'].hex() if result['file_data'] else None,
-        "encryption_mode": result['encryption_mode'].name,
-        "cmac_status": result['cmac_status'] if result['cmac_status'] else None
-    }
+    #response = {
+        #"picc_data_tag": result['picc_data_tag'].hex().upper(),
+        #"uid": result['uid'].hex().upper(),
+        #"read_ctr": result['read_ctr'],
+        #"file_data": result['file_data'].hex() if result['file_data'] else None,
+        #"encryption_mode": result['encryption_mode'].name,
+        #"cmac_status": result['cmac_status'] if result['cmac_status'] else None
+    #}
 
-    return response
+    return result1
 
-def validate_cmac(data, expected_cmac):
+def validateCmac(data, expected_cmac):
     # Placeholder for actual CMAC validation logic
     # Here we'll just return True as a placeholder
     return True
 
-def parse_encrypted_data(encrypted_data):
+def parseEncryptedData(encrypted_data):
     encrypted_data = encrypted_data.replace(" ", "")
     # Template 1: EC (24 bytes: 16 bytes PICC + 8 bytes CMAC)
     if len(encrypted_data) == 48:
