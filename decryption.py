@@ -1,5 +1,5 @@
 import binascii
-from decryptor import decrypt_sun_message, ParamMode, InvalidMessage, decrypt_data1
+from decryptor import ParamMode, InvalidMessage, decrypt_data1
 from fastapi import HTTPException
 from derive import derive_undiversified_key, derive_tag_key
 from config import (
@@ -8,15 +8,16 @@ from config import (
     ENC_PICC_DATA_PARAM,
     REQUIRE_LRP,
     SDMMAC_PARAM,
-    MASTER_KEY,
     UID_PARAM,
-    DERIVE_MODE,
+    DERIVE_MODE
 )
+from utils import get_secret
 
+secrets = get_secret("masterKey")
+#print("secrets : ", secrets)
+MASTER_KEY = bytes.fromhex(secrets['MasterKey'])
 def decryptData(picc_data,enc_file_data,cmac):
     # Placeholder for actual decryption logic
-    #print(type(encryptedData))
-    #picc_data, enc_file_data, cmac = parse_encrypted_data(encrypted_data)
     print(type(picc_data))
     print(type(cmac))
     try:
@@ -29,14 +30,6 @@ def decryptData(picc_data,enc_file_data,cmac):
     param_mode = ParamMode.SEPARATED
 
     try:
-        #result = decrypt_sun_message(
-            #param_mode=param_mode,
-            #sdm_meta_read_key=derive_undiversified_key(MASTER_KEY, 1),
-            #sdm_file_read_key=lambda uid: derive_tag_key(MASTER_KEY, uid, 2),
-            #picc_enc_data=enc_picc_data_b,
-            #sdmmac=sdmmac_b,
-            #enc_file_data=enc_file_data_b
-        #)
         meta_data_aes_key_bytes=derive_undiversified_key(MASTER_KEY, 1)
         result1 = decrypt_data1(picc_data,enc_file_data,meta_data_aes_key_bytes,cmac)
         print("result1 : ",result1)
@@ -46,15 +39,7 @@ def decryptData(picc_data,enc_file_data,cmac):
     if REQUIRE_LRP and result['encryption_mode'] != EncMode.LRP:
         raise HTTPException(status_code=400, detail="Invalid encryption mode, expected LRP.")
 
-    #response = {
-        #"picc_data_tag": result['picc_data_tag'].hex().upper(),
-        #"uid": result['uid'].hex().upper(),
-        #"read_ctr": result['read_ctr'],
-        #"file_data": result['file_data'].hex() if result['file_data'] else None,
-        #"encryption_mode": result['encryption_mode'].name,
-        #"cmac_status": result['cmac_status'] if result['cmac_status'] else None
-    #}
-
+    
     return result1
 
 def validateCmac(data, expected_cmac):

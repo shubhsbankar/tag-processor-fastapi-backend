@@ -3,7 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.inspection import inspect
 from fastapi import HTTPException
-DATABASE_URL = "postgresql://postgres:postgres*123@localhost:5432/postgres"
+#DATABASE_URL = "postgresql://postgres:postgres*123@localhost:5432/postgres"
+DATABASE_URL = "postgresql://cryptagadmin:J7e2UqKsM1iHr3XQNAbC@tag-db.c9y6e0my4hua.ap-south-1.rds.amazonaws.com:5432/tag_db"
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -16,6 +17,8 @@ class Tag(Base):
     counter = Column(Integer)
     encryptedfiledata = Column(String)
     blacklistvalue = Column(Boolean)
+    sdmreadcnt = Column(Integer)
+    proccessedcnt = Column(Integer)
 
 class Client(Base):
     __tablename__ = "clients"
@@ -59,7 +62,7 @@ def getClientFromDb(clientId: str):
         db.close()
 
 
-def updateTagTable(data: dict):
+def updateTagTable(data: dict, keyTobeUpdated: str):
     db = SessionLocal()
     try:
         uid = data.get('uid')
@@ -72,7 +75,7 @@ def updateTagTable(data: dict):
         
         for key, value in data.items():
             if hasattr(tag, key):
-                if key == 'blacklistvalue':
+                if key == keyTobeUpdated:
                    setattr(tag, key, value)
         
         db.commit()

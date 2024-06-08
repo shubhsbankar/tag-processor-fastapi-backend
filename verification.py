@@ -32,11 +32,29 @@ def verifyData(uid,counter,filedata,macVerified):
         score -= 3
         isBlacklisted = True
     
-    ret = verifyCounter(data['counter'],data) 
+    ret = verifyCounter(counter,data) 
     if ret == 1:
         score += 4
+        data['sdmreadcnt'] = counter
+        print("ret = 1 Data before saving in db", data)
+        updateTagTable(data,"sdmreadcnt")
+        verifyProccessedcnt(data)
     elif ret == 2:
         score += 2
+        data['sdmreadcnt'] = counter
+        print("ret = 2 Data before saving in db", data)
+        updateTagTable(data,"sdmreadcnt")
+        verifyProccessedcnt(data)
+    elif ret == 3:
+        score += 2
+        data['sdmreadcnt'] = counter
+        print("ret = 3 Data before saving in db", data)
+        updateTagTable(data,"sdmreadcnt")
+        verifyProccessedcnt(data)
+    elif ret == 4:
+        score += 0
+        verifyProccessedcnt(data)
+        print("Already processed tag")
     elif ret == -1:
         score -= 3
         isBlacklisted = True
@@ -54,9 +72,12 @@ def verifyData(uid,counter,filedata,macVerified):
         score -= 2
         isBlacklisted = True
     
-    if isBlacklisted and isUidVerified:
+    if isBlacklisted and isUidVerified and data['blacklistvalue'] == False:
         data['blacklistvalue'] = True
-        updateTagTable(data)
+        print("Data before saving in db", data)
+        updateTagTable(data,"blacklistvalue")
+    if data['blacklistvalue'] == True and isBlacklisted == False:
+        isBlacklisted = True
     #if verify_counter_in_database(co)
     print("score : ",score)
     return {"score" : score, "isBlacklisted": isBlacklisted, "error": error}
@@ -65,12 +86,19 @@ def verifyUid(uid, data):
     return uid == data['uid']
 
 def verifyCounter(counter, data):
-    if counter < data["counter"]:
+    print("Counter",counter,data['sdmreadcnt'])
+    if counter == data['sdmreadcnt'] and data['proccessedcnt'] == 2:
         return -1
-    if counter <= data['counter'] + 5:
+    if counter == data['sdmreadcnt'] and data['proccessedcnt'] == 1:
+        return 4
+    if counter < data["sdmreadcnt"]:
+        return -1
+    if counter <= data['sdmreadcnt'] + 5:
         return 1
-    elif counter <= data['counter'] + 8:
+    elif counter <= data['sdmreadcnt'] + 8:
         return 2
+    elif counter <= data['sdmreadcnt'] + 10:
+        return 3
     else :
         return 0
 
@@ -88,4 +116,12 @@ def verifyEncFileData(filedata, data):
                  
     return filedata == decryptedMessage
 
+def verifyProccessedcnt(data):
+   cnt = data['proccessedcnt']
+   if cnt == 2:
+      cnt = 1
+   elif cnt < 2:
+      cnt += 1
+   data['proccessedcnt'] = cnt
+   updateTagTable(data,"proccessedcnt")
 
