@@ -19,10 +19,11 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import jwt
 import uuid
-from database import Base, engine, Client, updateClientInDatabase, getClientFromDb, get_db
+from database import Base, engine, Client, updateClientInDatabase, getClientFromDb, get_db, register_client_in_database,get_clients_from_database
 from sqlalchemy.orm import Session
 from utils import get_secret
-
+from fastapi.middleware.cors import CORSMiddleware
+from typing import List
 
 SECRET_KEY = get_secret("secretKey")["secretKey"]
 ALGORITHM = "HS256"
@@ -40,6 +41,22 @@ app = FastAPI(
     redoc_url=None,  # Disable ReDoc
     openapi_url="/openapi.json"
 )
+
+# Configure CORS
+origins = [
+    "http://localhost:5174",  # Your local development server
+    "http://127.0.0.1:5174",  # Localhost with IP
+    # Add other origins if needed, such as your production frontend URL
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Allow specified origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
+
 
 # Models
 class TagData(BaseModel):
@@ -68,6 +85,19 @@ class TokenRequest(BaseModel):
     client_id: str
     client_secret: str
 
+class ClientData(BaseModel):
+    username: str
+    password: str
+    email: str
+    phone: str
+    companyName: str
+    companyRegType: str
+    industryType: str
+class ClientModel(ClientData):
+    id: int
+
+    class Config:
+        from_attributes = True
 # Password context for hashing passwords
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -181,6 +211,22 @@ async def read_tag(tagdata: TagData, current_client: Client = Depends(get_curren
         response_json = json.dumps(retResponse).encode()
         encrypted_response = encrypt_aes(response_json, AES_KEY)
         return JSONResponse(content={"encryptedResult": encrypted_response})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post(API_VERSION + "/register-client")
+async def register_client(clientdata: ClientData):
+    try:
+        return register_client_in_database(clientdata)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+ 
+@app.get(API_VERSION + "/clients", response_model=List[ClientModel])
+#@app.post(API_VERSION + "/clients")
+def get_clients():
+    print("got get request for clients")
+    try:
+        return get_clients_from_database()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

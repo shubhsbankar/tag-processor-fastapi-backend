@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.inspection import inspect
 from fastapi import HTTPException
+from datetime import datetime
 #DATABASE_URL = "postgresql://postgres:postgres*123@localhost:5432/postgres"
 DATABASE_URL = "postgresql://cryptagadmin:J7e2UqKsM1iHr3XQNAbC@tag-db.c9y6e0my4hua.ap-south-1.rds.amazonaws.com:5432/tag_db"
 
@@ -27,6 +28,19 @@ class Client(Base):
     client_id = Column(String, unique=True, index=True)
     client_secret = Column(String, unique=True, index=True)
     user_id = Column(Integer)
+
+class ClientData(Base):
+    __tablename__ = "clientdata"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String)
+    password = Column(String)
+    companyname = Column(String)
+    companyregtype = Column(String)
+    industrytype = Column(String)
+    email = Column(String, unique=True, index=True)
+    phone = Column(String, unique=True, index=True)
+    accountstatus = Column(String)
+    registrationdate = Column(String)
 
 Base.metadata.create_all(bind=engine)
 
@@ -117,3 +131,56 @@ def updateClientInDatabase(clientId: str, clientSecret: str, userId: int):
         raise e
     finally:
         db1.close()
+
+def register_client_in_database(data):
+    print(data)
+    db = SessionLocal()
+    try:
+        #client = db.query(Client).filter(Client.user_id == userId).first()
+        # Check if the email or phone already exists
+        existing_client = db.query(ClientData).filter(
+            (ClientData.email == data.email) | (ClientData.phone == data.phone)
+        ).first()
+
+        if existing_client:
+            raise HTTPException(
+                status_code=400,
+                detail="A client with this email or phone number already exists."
+            )
+        db_client = ClientData(
+          username=data.username,
+          companyname=data.companyName,
+          industrytype=data.industryType,
+          email=data.email,
+          phone=data.phone,
+          companyregtype=data.companyRegType,
+          password=data.password,
+          accountstatus="Active",
+          registrationdate=datetime.now().strftime("%d-%m-%Y")
+        )
+        db.add(db_client)
+        db.commit()
+        db.refresh(db_client)
+        return db_client
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+
+def get_clients_from_database():
+    db = SessionLocal()
+    try:
+       clients = db.query(ClientData).offset(skip).limit(limit).all()
+       if clients:
+           raise HTTPException(
+           status_code=400,
+           detail='No client is register'
+           )
+       return clients
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+
