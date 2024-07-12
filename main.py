@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel
-from decryption import decryptData, validateCmac, parseEncryptedData
+from decryption import decryptData, validateCmac, parseEncryptedData, kdf, derive_key
 from verification import verifyData
 from datetime import datetime, timedelta
 import hmac
@@ -19,7 +19,7 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import jwt
 import uuid
-from database import Base, engine, Client, updateClientInDatabase, getClientFromDb, get_db, register_client_in_database,get_clients_from_database
+from database import Base, engine, Client, updateClientInDatabase, getClientFromDb, get_db, register_client_in_database,get_clients_from_database,add_tag_in_database, get_tags_from_database,device_log_in_database, delete_client_from_database, update_tag_in_database,get_client_api_keys_secrets_from_database,delete_client_api_keys_from_database,update_client_in_database,add_admin_user_in_database,update_admin_user_in_database,delete_admin_user_from_database, AdminUser, get_admin_user_from_database,get_device_logs_from_database
 from sqlalchemy.orm import Session
 from utils import get_secret
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,15 +37,17 @@ app = FastAPI(
     title="Cryptag API",
     description="API documentation for Cryptag",
     version="1.0.0",
-    docs_url="/docs",
+    docs_url="/",
     redoc_url=None,  # Disable ReDoc
     openapi_url="/openapi.json"
 )
 
 # Configure CORS
 origins = [
+    "http://localhost:5173",  # Your local development server
     "http://localhost:5174",  # Your local development server
     "http://127.0.0.1:5174",  # Localhost with IP
+    "http://127.0.0.1:5173",  # Localhost with IP
     # Add other origins if needed, such as your production frontend URL
 ]
 
@@ -61,6 +63,11 @@ app.add_middleware(
 # Models
 class TagData(BaseModel):
     encryptedData: str
+    systemID: str
+    systemIP: str
+    systemVersion: str
+    deviceType: str
+    timestamp: str
 
 class Token(BaseModel):
     access_token: str
@@ -85,19 +92,90 @@ class TokenRequest(BaseModel):
     client_id: str
     client_secret: str
 
+class Tag(BaseModel):
+    filedata: str
+    readcnt: int
+    uid: str
+
+class ClientDataBase(BaseModel):
+    id: int
+    username: str
+    #companyname: str
+
+    class Config:
+        from_attributes = True
+
+class TagModel(BaseModel):
+    clientid : int
+    #username : str
+    uid: str
+    batchno: str
+    tagstatus:str
+    tagactivateddatetime: str
+    sdmreadcnt: int
+    lastscandatetime: str
+    fraud : int
+    blacklistvalue : bool
+    client: Optional[ClientDataBase] = None
+    class Config:
+        from_attributes = True
+
+
+class KeysModel(BaseModel):
+    key0 : str
+    key1 : str
+    key2 : str
+    key3 : str
+
 class ClientData(BaseModel):
     username: str
     password: str
     email: str
     phone: str
-    companyName: str
-    companyRegType: str
-    industryType: str
+    companyname: str
+    companyregtype: str
+    industrytype: str
+
 class ClientModel(ClientData):
     id: int
+    accountstatus : str
+    registrationdate: str
 
     class Config:
         from_attributes = True
+class ClientApiModel(ClientModel):
+    apikey: str
+    secret: str
+
+    class Config:
+        from_attributes = True
+
+class AdminUserModel(BaseModel):
+    id: int
+    email: str
+    first_name: str
+    last_name: str
+    password: str
+    profile: str
+    permission: str
+
+    class Config:
+        from_attributes = True
+
+class DeviceLogModel(BaseModel):
+    id : int
+    systemip: str
+    systemid: str
+    systemversion: str
+    devicetype: str
+    timestamp: str
+    uid:str
+
+    class Config:
+        from_attributes = True
+
+
+
 # Password context for hashing passwords
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -184,16 +262,33 @@ async def get_current_client(token: str = Depends(oauth2_scheme), db: Session = 
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-@app.post(API_VERSION + "/read_tag")
+
+def extract_serial_parts(serial):
+        print("serial is :",serial)
+        return {
+            'tag_edition': serial[7:9],
+            'kv': serial[9:11],
+            'product_serial': serial[-4:]
+        }
+@app.post(API_VERSION + "/read-tag")
 async def read_tag(tagdata: TagData, current_client: Client = Depends(get_current_client)):
     try:
-        encryptedData = tagdata.encryptedData
+        print(tagdata.encryptedData)
+        serial_parts = extract_serial_parts(tagdata.encryptedData[:21])
+        encryptedData = tagdata.encryptedData[21:]
+        print(serial_parts['tag_edition'])
+        print(serial_parts['kv'])
+        print(serial_parts['product_serial'])
+        #encryptedData = tagdata.encryptedData
         piccData, encFileData, cmac = parseEncryptedData(encryptedData)
-        response = decryptData(piccData, encFileData, cmac)
+        salt = serial_parts['tag_edition'] + serial_parts['kv'] + serial_parts['product_serial']
+        response = decryptData(serial_parts['kv'], salt,piccData, encFileData, cmac)
         if "error" in response:
             return response
         cmacStatus = response["cmac_status"] == "MAC is Correct"
-        verifyRes = verifyData(response['uid'], response['sdm_read_cnt'], response["decrypted_encfiledata"], cmacStatus)
+        verifyRes = verifyData(serial_parts['kv'], salt, response['uid'], response['sdm_read_cnt'], response["decrypted_encfiledata"], cmacStatus)
+        device_log_in_database(tagdata,response['uid'])
+        print("Final score is : ",verifyRes)
         if verifyRes["score"] >= 12:
             status = "Original"
         else:
@@ -221,14 +316,141 @@ async def register_client(clientdata: ClientData):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
  
-@app.get(API_VERSION + "/clients", response_model=List[ClientModel])
-#@app.post(API_VERSION + "/clients")
-def get_clients():
+@app.get(API_VERSION + "/manage-clients", response_model=List[ClientModel])
+async def get_clients():
     print("got get request for clients")
     try:
-        return get_clients_from_database()
+        clients = get_clients_from_database()
+        return clients
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get(API_VERSION + "/taginfo", response_model=List[TagModel])
+async def get_tag_information():
+    print("got get request for taginfo")
+    try:
+        tags = get_tags_from_database()
+        return tags
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post(API_VERSION + "/add-tag")
+async def add_tag(tagdata: List[Tag]):
+    print("In add_tag",tagdata)
+    try:
+        return add_tag_in_database(tagdata)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get(API_VERSION + "/generate-keys/{uid}", response_model=KeysModel)
+async def generate_keys(uid: str):
+    print("get request for /generate-keys")
+    serial_parts = extract_serial_parts(uid)
+    #encryptedData = tagdata.encryptedData[21:]
+    print(serial_parts['tag_edition'])
+    print(serial_parts['kv'])
+    print(serial_parts['product_serial'])
+    tag_edition = serial_parts['tag_edition']
+    kv = serial_parts['kv']
+    product_serial = serial_parts['product_serial']       
+    salt = tag_edition + kv + product_serial
+    derived_keys = [derive_key(kv,salt, index) for index in range(5)]
+    return {'key0' : derived_keys[0], 'key1' : derived_keys[1], 'key2' : derived_keys[2], 'key3' : derived_keys[3]}
+    return kdf(uid)
+
+@app.delete(API_VERSION + "/delete-client/{id}")
+async def delete_client(id: int):
+    print("delete request for id = ",id)
+    try:
+        return delete_client_from_database(id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.put(API_VERSION + "/update-tag/{id}")
+async def update_tag(id: int, updated_tag: TagModel):
+    print("update tag for id = ",id)
+    try:
+        return update_tag_in_database(id, updated_tag)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get(API_VERSION + "/client-api-keys", response_model=List[ClientApiModel])
+async def get_client_api_key_secret():
+    print("get request for /client-api-keys")
+    return get_client_api_keys_secrets_from_database()
+
+
+@app.delete(API_VERSION + "/client-api-keys/{id}")
+async def delete_api_keys(id: int):
+    print("delete keys for id = ",id)
+    try:
+        return delete_client_api_keys_from_database(id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.put(API_VERSION + "/manage-clients/{id}")
+async def update_client(id : int, updatedClient : ClientModel):
+    print("Update the client")
+    try:
+        clients =  update_client_in_database(id, updatedClient)
+        return clients
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get(API_VERSION + "/admin-user", response_model=List[AdminUserModel])
+async def get_admin_user():
+    print("got post request to add the admin user")
+    try:
+       return get_admin_user_from_database()
+    except ValueError as e:
+       raise HTTPException(status_code=400, detail=str(e))
+
+@app.get(API_VERSION + "/admin-user/{emailid}", response_model=List[AdminUserModel])
+async def get_admin_user(emailid: str):
+    print("got post request to add the admin user")
+    try:
+       return get_admin_user_from_database(emailid)
+    except ValueError as e:
+       raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post(API_VERSION + "/admin-user")
+async def add_admin_user(user : AdminUserModel):
+    print("got post request to add the admin user")
+    try:
+       return add_admin_user_in_database(user)
+    except ValueError as e:
+       raise HTTPException(status_code=400, detail=str(e))
+
+
+
+@app.put(API_VERSION + "/admin-user/{id}")
+async def update_admin_user(id:int, admin_user: AdminUserModel):
+    print("got post request to update the admin user")
+    try:
+       update_admin_user_in_database(id,admin_user)
+    except ValueError as e:
+       raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete(API_VERSION + "/admin-user/{id}")
+async def delete_admin_user(id : int):
+    print("got post request to delete the admin user")
+    try:
+       delete_admin_user_from_database(id)
+    except ValueError as e:
+       raise HTTPException(status_code=400, detail=str(e))
+
+@app.get(API_VERSION + "/device-logs", response_model=List[DeviceLogModel])
+async def get_device_logs():
+    print("got get request for device logs")
+    try:
+       return get_device_logs_from_database()
+    except ValueError as e:
+       raise HTTPException(status_code=400, detail=str(e))
+
+
+
 
 @app.on_event("startup")
 def on_startup():

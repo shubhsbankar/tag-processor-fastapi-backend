@@ -21,4 +21,6 @@ def get_secret(secret_name):
         raise e
 
     secret = get_secret_value_response['SecretString']
+    if "SuperMasterKey" in secret_name:
+        return secret
     return json.loads(secret)

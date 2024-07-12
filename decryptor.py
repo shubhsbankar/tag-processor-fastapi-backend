@@ -14,6 +14,7 @@ import binascii
 
 import platform
 
+from utils import get_secret
 # Determine the correct shared library based on the OS
 if platform.system() == "Windows":
     lib_name = "uFCoder-x86_64.dll"
@@ -128,27 +129,26 @@ def decrypt_file_data1(smd_read_counter,uid_hex,auth_key_bytes,enc_file_data_hex
 
 
 
-def decrypt_data1(enc_picc_data_hex,file_data,meta_data_aes_key_bytes,cmac):
+def decrypt_data1(kv,enc_picc_data_hex,file_data,meta_data_aes_key_hex,cmac):
     #data = request.json
+    print(meta_data_aes_key_hex)
     try:
         #enc_picc_data_hex = data['enc_picc_data_hex']
         #meta_data_aes_key_hex = data['meta_data_aes_key_hex']
         print(type(enc_picc_data_hex))
-        print(type(meta_data_aes_key_bytes))
+        print(type(meta_data_aes_key_hex))
         # Convert hex strings to byte arrays
         enc_picc_data_bytes = hex_string_to_byte_array(enc_picc_data_hex)
-        #meta_data_aes_key_bytes = hex_string_to_byte_array(meta_data_aes_key_hex)
+        meta_data_aes_key_bytes = hex_string_to_byte_array(meta_data_aes_key_hex)
 
         # Prepare output variables
-        picc_data_tag = ctypes.c_uint8()
+        picc_data_tag = ctypes.c_uint8(0xC7)
         uid = (ctypes.c_uint8 * 7)()
         sdm_read_cnt = ctypes.c_uint32()
 
         # Convert byte arrays to ctypes
         enc_picc_data_c = (ctypes.c_uint8 * len(enc_picc_data_bytes))(*enc_picc_data_bytes)
         meta_data_aes_key_c = (ctypes.c_uint8 * len(meta_data_aes_key_bytes))(*meta_data_aes_key_bytes)
-
-
 
         # Perform decryption
         status = ufcoder.nt4h_decrypt_picc_data(
@@ -164,6 +164,7 @@ def decrypt_data1(enc_picc_data_hex,file_data,meta_data_aes_key_bytes,cmac):
             return {"error": f"PICC data decryption failed with status: {status}"}
         else:
             uid_str = ''.join(f'{byte:02X}' for byte in uid)
+            print("output uid: ", bytes(uid).hex().upper())
             sdm_read_cnt_str = sdm_read_cnt.value
             #print("Validate : ",validate_plain_sun(uid,sdm_read_cnt,cmac,meta_data_aes_key_bytes,None))
             ascii_mac_in = (ctypes.c_uint8*256)()
@@ -171,9 +172,12 @@ def decrypt_data1(enc_picc_data_hex,file_data,meta_data_aes_key_bytes,cmac):
             #print("Validate using uFCoder : ", ufcoder.nt4h_check_sdm_mac(sdm_read_cnt, uid, meta_data_aes_key_bytes, ascii_mac_in , mac_in_len, cmac))
             #print("validating mac with python code :",verify_mac(sdm_read_cnt_str,uid_str,meta_data_aes_key_bytes,file_data,"70",cmac))
             print("sdm_read_cnt_str",sdm_read_cnt_str,uid_str,file_data,cmac)
-            print("validating mac with python code 1:",verify_mac(sdm_read_cnt_str,uid_str,"00000000000000000000000000000000",file_data,"70",cmac))
+            secret = get_secret(f"SuperMasterKey{kv}")
+            print("secret", secret)
+            #master_key = secret[f"SuperMasterKey{kv}"]
+            print("validating mac with python code 1:",verify_mac(sdm_read_cnt_str,uid_str,meta_data_aes_key_hex,file_data,"70",cmac))
 
-            macVerified, message = verify_mac(sdm_read_cnt_str,uid_str,"00000000000000000000000000000000",file_data,"70",cmac)
+            macVerified, message = verify_mac(sdm_read_cnt_str,uid_str,meta_data_aes_key_hex,file_data,"70",cmac)
             if macVerified:
                 response = {"cmac_status" : "MAC is Correct"}
             else:

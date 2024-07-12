@@ -3,8 +3,9 @@ from derive import derive_undiversified_key
 from config import (
     MASTER_KEY
 )
+from decryption import derive_key
 from decryptor import decrypt_file_data1
-def verifyData(uid,counter,filedata,macVerified):
+def verifyData(kv,salt,uid,counter,filedata,macVerified):
     # Implement your verification logic here
     data = getTagDataFromPostgres(uid)
     print("got data form database : ",data)
@@ -17,6 +18,7 @@ def verifyData(uid,counter,filedata,macVerified):
     error = ""
     isBlacklisted = False
     if macVerified:
+        print("macVerified score + 5",score)
         score += 5
     else:
         print("mac verification failed")
@@ -25,6 +27,7 @@ def verifyData(uid,counter,filedata,macVerified):
         isBlacklisted = True
     isUidVerified = verifyUid(data['uid'],data) 
     if isUidVerified: # Placeholder
+        print("isUidVerified score + 4",score)
         score += 4
     else:
         print("uid verification failed")
@@ -34,28 +37,33 @@ def verifyData(uid,counter,filedata,macVerified):
     
     ret = verifyCounter(counter,data) 
     if ret == 1:
+        print("verifyCounter score + 4",score)
         score += 4
         data['sdmreadcnt'] = counter
         print("ret = 1 Data before saving in db", data)
         updateTagTable(data,"sdmreadcnt")
         verifyProccessedcnt(data)
     elif ret == 2:
+        print("verifyCounter score + 2",score)
         score += 2
         data['sdmreadcnt'] = counter
         print("ret = 2 Data before saving in db", data)
         updateTagTable(data,"sdmreadcnt")
         verifyProccessedcnt(data)
     elif ret == 3:
+        print("verifyCounter ret=3  score + 2",score)
         score += 2
         data['sdmreadcnt'] = counter
         print("ret = 3 Data before saving in db", data)
         updateTagTable(data,"sdmreadcnt")
         verifyProccessedcnt(data)
     elif ret == 4:
+        print("verifyCounter ret=4 score + 0",score)
         score += 0
         verifyProccessedcnt(data)
         print("Already processed tag")
     elif ret == -1:
+        print("verifyCounter ret=-1 score - 3",score)
         score -= 3
         isBlacklisted = True
     else:
@@ -64,7 +72,8 @@ def verifyData(uid,counter,filedata,macVerified):
         score -= 5
 
 
-    if verifyEncFileData(filedata, data):
+    if verifyEncFileData(kv,salt,filedata, data):
+        print("verifyEncFileData score + 2",score)
         score += 2
     else:
         print("encFileData verification failed")
@@ -102,10 +111,12 @@ def verifyCounter(counter, data):
     else :
         return 0
 
-def verifyEncFileData(filedata, data):
-    meta_data_aes_key_bytes=derive_undiversified_key(MASTER_KEY, 1)
+def verifyEncFileData(kv,salt,filedata, data):
+    master_key = derive_key(kv,salt,0)
+    derived_keys = [derive_key(kv,salt, index) for index in range(5)]
+    #meta_data_aes_key_bytes=derive_undiversified_key(MASTER_KEY, 1)
     print("database counter type",type(data["counter"]))
-    ret = decrypt_file_data1(data["counter"],data["uid"],meta_data_aes_key_bytes,data["encryptedfiledata"])
+    ret = decrypt_file_data1(data["counter"],data["uid"],bytes.fromhex(derived_keys[0]),data["encryptedfiledata"])
     if ret["error"]:
         print("ret : ", ret)
         return False
